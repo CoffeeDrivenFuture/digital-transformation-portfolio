@@ -2,53 +2,47 @@
 """
 kpi_engine.py
 --------------
-US-101 + US-103 megvalósítása:
+Implements US-101 + US-103.
 
-  US-101: "OEE broken down into Availability, Performance and Quality
-           per machine" -- értékek a SQLite adatbázisból, nem hardkódolva.
-  US-103: "MTBF and MTTR calculated from the simulation event log" --
-           MTBF = átlagos idő két meghibásodás-kezdet között gépenként,
-           MTTR = átlagos javítási időtartam gépenként. Mindkettő a
-           kpi_daily táblába kerül.
+US-101 wants OEE broken into Availability, Performance and Quality per
+machine, computed from the SQLite database rather than hardcoded. US-103
+wants MTBF and MTTR calculated from the simulation event log: MTBF is the
+average time between two failure starts per machine, MTTR is the average
+repair duration per machine. Both land in the kpi_daily table.
 
-FONTOS SZABÁLY: csak COMPLETED státuszú run_id-kra számolunk. Ez a
-Confluence "Hibakezelés" pontjának közvetlen következménye -- egy FAILED
-futás részleges adata torzítaná a KPI-ket.
+We only compute for run_ids with COMPLETED status -- per the Confluence
+"Error handling" section, a FAILED run's partial data would distort the
+KPIs.
 
-Módszertan (dokumentálva, mert ez egy értelmezési kérdés, nem egyértelmű
-képlet):
+A note on methodology, since this isn't a single unambiguous formula.
+machine_status_log logs three states per machine: working / blocked /
+repair. We turn these into segments (from-to for each state), then cut
+them into daily (1440-minute) blocks to match the kpi_daily table's
+sim_day granularity.
 
-  - A machine_status_log-ban 3 állapotot naplózunk: working / blocked / repair.
-    Ezekből "szegmenseket" építünk (mettől-meddig volt az adott állapotban
-    a gép), majd ezeket napi (1440 perces) blokkokra vágjuk szét, hogy a
-    kpi_daily tábla sim_day granularitását ki tudjuk szolgálni.
+Availability = working time / (working + blocked + repair), per day. It's
+a simplified "Run Time / Planned Production Time" -- blocked time counts
+against Availability, the same way a material-shortage stoppage would on
+a real line.
 
-  - Availability = working_idő / (working+blocked+repair összesen), naponta.
-    (Ez a klasszikus "Run Time / Planned Production Time" arány egy
-    egyszerűsített verziója -- a "blocked" időt letöltött, de nem hasznos
-    időnek tekintjük, tehát az Availability-t rontja, ahogy egy valós
-    üzemben a anyaghiány miatti állás is rontaná.)
+Performance = (ideal cycle time x pieces produced) / working time, per day
+per machine. The ideal cycle time comes from config/prod_config.py
+MACHINE_PARAMS, or from the machines master table tied to the run if it
+was overridden.
 
-  - Performance = (elméleti ciklusidő × legyártott darabszám) / working_idő,
-    naponta, gépenként. Az elméleti ciklusidőt a config/prod_config.py
-    MACHINE_PARAMS-ból vesszük (vagy a simulation_runs-hoz tartozó
-    machines törzstáblából, ha az felül lett írva egy adott futásnál).
+Quality = good pieces / total pieces (production_events.is_good), per day.
+OEE = Availability x Performance x Quality.
 
-  - Quality = jó darab / összes darab (production_events.is_good), naponta.
+MTBF is the average gap between the start timestamps of consecutive
+'repair' segments per machine; a gap is counted on whichever day the
+later failure falls in. MTTR is the average duration of each 'repair'
+segment (start to the next 'working' start), counted on the day the
+segment starts.
 
-  - OEE = Availability × Performance × Quality.
-
-  - MTBF: a 'repair' állapotú szegmensek KEZDŐ időpontjai közötti
-    különbségek átlaga, gépenként. Egy adott napra azok a különbségek
-    számítanak, amelyeknél a KÉSŐBBI meghibásodás abba a napba esik.
-
-  - MTTR: minden 'repair' szegmens (kezdet -> következő 'working' kezdete)
-    időtartamának átlaga, gépenként, aznapra, amelyikbe a szegmens eleje esik.
-
-  Mivel ez szintetikus, oktatási célú adaton fut, a fenti egyszerűsítések
-  (pl. napi vágásnál a szegmensek nem "arányosítva" oszlanak meg MTBF/MTTR
-  szempontból, csak Availability/Performance szempontból) dokumentált,
-  tudatos döntések -- egy éles rendszerben ezt pontosítani kellene.
+This runs on synthetic data, so a couple of the choices above are
+deliberate simplifications rather than universal truths -- segments that
+cross a day boundary get split proportionally for Availability/Performance
+but not for MTBF/MTTR. A production system would want this refined.
 """
 
 import os
@@ -66,16 +60,17 @@ from config.prod_config import MACHINE_PARAMS as DEFAULT_MACHINE_PARAMS  # noqa:
 from db_layer import get_connection                                       # noqa: E402
 
 DB_PATH = os.path.join(PROJECT_ROOT, "data", "digital_manufacturing.db")
-DAY_LENGTH = 24 * 60  # perc
+DAY_LENGTH = 24 * 60  # minutes
 
 
 # ---------------------------------------------------------------------------
-# SEGÉDFÜGGVÉNYEK
+# HELPER FUNCTIONS
 # ---------------------------------------------------------------------------
 def _build_segments(status_df: pd.DataFrame, machine_id: str, sim_end_time: float) -> list:
     """
-    A machine_status_log sorokból (időpont + állapot) (start, end, status)
-    szegmenseket épít egy adott gépre. Az utolsó szegmens a run végéig tart.
+    Builds (start, end, status) segments for a given machine from the
+    machine_status_log rows (timestamp + status). The last segment lasts
+    until the end of the run.
     """
     df = status_df[status_df["machine_id"] == machine_id].sort_values("sim_time")
     times = df["sim_time"].tolist()
@@ -92,8 +87,8 @@ def _build_segments(status_df: pd.DataFrame, machine_id: str, sim_end_time: floa
 
 def _split_segments_by_day(segments: list) -> dict:
     """
-    {day: {status: duration}} -- egy szegmens, ha átnyúlik napváltáson,
-    arányosan szétvágódik a napok között.
+    {day: {status: duration}} -- if a segment crosses a day boundary, it
+    gets proportionally split between the days.
     """
     day_status_duration = defaultdict(lambda: defaultdict(float))
     for start, end, status in segments:
@@ -109,8 +104,8 @@ def _split_segments_by_day(segments: list) -> dict:
 
 def _mtbf_mttr_by_day(segments: list) -> tuple:
     """
-    segments: az adott gép ÖSSZES (start, end, status) szegmense (nem napra vágva).
-    Visszaadja: ({day: mtbf}, {day: mttr})
+    segments: ALL (start, end, status) segments of the given machine (not cut by day).
+    Returns: ({day: mtbf}, {day: mttr})
     """
     repair_segments = [(s, e) for s, e, st in segments if st == "repair"]
     repair_segments.sort(key=lambda x: x[0])
@@ -124,7 +119,7 @@ def _mtbf_mttr_by_day(segments: list) -> tuple:
     starts = [s for s, _ in repair_segments]
     for i in range(1, len(starts)):
         gap = starts[i] - starts[i - 1]
-        day = int(starts[i] // DAY_LENGTH)  # a KÉSŐBBI meghibásodás napjához rendeljük
+        day = int(starts[i] // DAY_LENGTH)  # assigned to the day of the LATER failure
         mtbf_by_day[day].append(gap)
 
     mtbf_avg = {day: sum(vals) / len(vals) for day, vals in mtbf_by_day.items()}
@@ -133,25 +128,25 @@ def _mtbf_mttr_by_day(segments: list) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# FŐ SZÁMÍTÁS
+# MAIN CALCULATION
 # ---------------------------------------------------------------------------
 def compute_kpis_for_run(conn, run_id: int) -> pd.DataFrame:
     """
-    Kiszámolja az OEE-komponenseket + MTBF/MTTR-t minden gépre, minden napra,
-    egy adott run_id-hoz. Visszaad egy DataFrame-et (nem ír adatbázisba --
-    azt a write_kpis_to_db() csinálja, hogy a számítás és az írás külön
-    tesztelhető legyen).
+    Computes the OEE components + MTBF/MTTR for every machine, every day,
+    for a given run_id. Returns a DataFrame (does not write to the
+    database -- write_kpis_to_db() does that, so the calculation and the
+    writing can be tested separately).
     """
     run_row = conn.execute(
         "SELECT status, sim_duration FROM simulation_runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     if run_row is None:
-        raise ValueError(f"run_id={run_id} nem található a simulation_runs táblában.")
+        raise ValueError(f"run_id={run_id} not found in the simulation_runs table.")
     status, sim_duration = run_row
     if status != "COMPLETED":
         raise ValueError(
-            f"run_id={run_id} státusza '{status}', nem 'COMPLETED' -- "
-            "a KPI-motor szándékosan csak lezárt futásokat dolgoz fel."
+            f"run_id={run_id} has status '{status}', not 'COMPLETED' -- "
+            "the KPI engine deliberately only processes finalized runs."
         )
 
     events_df = pd.read_sql(
@@ -162,9 +157,9 @@ def compute_kpis_for_run(conn, run_id: int) -> pd.DataFrame:
         "SELECT sim_time, machine_id, status FROM machine_status_log WHERE run_id = ?",
         conn, params=(run_id,),
     )
-    # a gép törzsadatból vesszük a cycle_time-ot -- ez tükrözi az adott
-    # futáshoz ténylegesen használt (esetlegesen felülírt) paramétert,
-    # nem a config default-ját
+    # we take the cycle_time from the machine master data -- this reflects
+    # the parameter actually used for this run (possibly overridden),
+    # not the config default
     machines_df = pd.read_sql("SELECT machine_id, cycle_time_base FROM machines", conn)
     cycle_time_by_machine = dict(zip(machines_df["machine_id"], machines_df["cycle_time_base"]))
 
@@ -216,7 +211,7 @@ def compute_kpis_for_run(conn, run_id: int) -> pd.DataFrame:
 
 
 def write_kpis_to_db(conn, kpi_df: pd.DataFrame) -> None:
-    """A kiszámolt KPI-sorokat beírja (INSERT OR REPLACE) a kpi_daily táblába."""
+    """Writes the computed KPI rows (INSERT OR REPLACE) into the kpi_daily table."""
     cur = conn.cursor()
     for _, row in kpi_df.iterrows():
         cur.execute(
@@ -233,12 +228,12 @@ def write_kpis_to_db(conn, kpi_df: pd.DataFrame) -> None:
 
 
 def run_kpi_engine(run_id: int, db_path: str = DB_PATH) -> pd.DataFrame:
-    """Kényelmi wrapper: megnyitja a DB-t, számol, ír, visszaadja az eredményt."""
+    """Convenience wrapper: opens the DB, computes, writes, returns the result."""
     conn = get_connection(db_path)
     try:
         kpi_df = compute_kpis_for_run(conn, run_id)
         write_kpis_to_db(conn, kpi_df)
-        print(f"[OK] {len(kpi_df)} kpi_daily sor beírva run_id={run_id}-hez.")
+        print(f"[OK] {len(kpi_df)} kpi_daily rows written for run_id={run_id}.")
         return kpi_df
     finally:
         conn.close()
@@ -252,7 +247,7 @@ if __name__ == "__main__":
     conn.close()
 
     if latest_completed is None:
-        print("Nincs COMPLETED státuszú futás az adatbázisban -- futtasd előbb a szimulációt.")
+        print("No run with COMPLETED status in the database -- run the simulation first.")
     else:
         df = run_kpi_engine(latest_completed)
         print(df.to_string(index=False))

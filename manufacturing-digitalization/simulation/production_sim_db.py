@@ -2,17 +2,16 @@
 """
 production_sim_db.py
 ---------------------
-A production_sim_lean.py (SimPy termelési szimuláció) kibővített verziója,
-US-401 (SQLite írás) szerint, MOST MÁR a config/prod_config.py-ból importált
-konfigurációval -- lásd az ott lévő magyarázatot a strukturális vs.
-futtatási paraméterek elválasztásáról.
+An extended version of production_sim_lean.py (SimPy production simulation),
+per US-401 (SQLite writing), now using configuration imported from
+config/prod_config.py -- see the explanation there about the separation of
+structural vs. runtime parameters.
 
-run_simulation() argumentumként fogadja azokat a paramétereket, amiket a
-Jira US-402 szerint a Streamlit dashboardon majd állítani lehet (order
-pattern, batch size, sim_time, seed, gépenkénti cycle_time/quality
-felülírás). Ha ezeket nem adod meg, a prod_config.py alapértékei
-érvényesülnek -- így a script önmagában, Streamlit nélkül is ugyanúgy
-lefut, mint eddig.
+run_simulation() accepts as arguments the parameters that, per Jira US-402,
+will be adjustable on the Streamlit dashboard (order pattern, batch size,
+sim_time, seed, per-machine cycle_time/quality overrides). If these are not
+provided, the defaults from prod_config.py apply -- so the script still runs
+the same on its own, without Streamlit, as before.
 """
 
 import os
@@ -23,7 +22,7 @@ import copy
 import simpy
 import pandas as pd
 
-# --- config/prod_config.py elérése, mappaszerkezettől függetlenül ---------
+# --- accessing config/prod_config.py, independent of folder structure ----
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # .../case-a/simulation
 PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # .../case-a
 sys.path.insert(0, PROJECT_ROOT)
@@ -53,7 +52,7 @@ DB_PATH = os.path.join(PROJECT_ROOT, "data", "digital_manufacturing.db")
 
 
 # ---------------------------------------------------------------------------
-# GÉP OSZTÁLY (változatlan)
+# MACHINE CLASS (unchanged)
 # ---------------------------------------------------------------------------
 class Machine:
     def __init__(self, env, name, params, status_log):
@@ -104,7 +103,7 @@ class Machine:
 
 
 # ---------------------------------------------------------------------------
-# ANYAGELLÁTÁS (változatlan)
+# MATERIAL SUPPLY (unchanged)
 # ---------------------------------------------------------------------------
 def pre_production(env, material_stock, material_stock_log, material_logs):
     while True:
@@ -128,7 +127,7 @@ def produce_material(env, material_stock, mat, props, material_logs):
 
 
 # ---------------------------------------------------------------------------
-# TERMELÉSI FOLYAMAT (változatlan)
+# PRODUCTION PROCESS (unchanged)
 # ---------------------------------------------------------------------------
 def production_process(env, product_type, machines, material_stock, production_log, machine_status_log):
     route = PRODUCT_PARAMS[product_type]["route"]
@@ -169,7 +168,7 @@ def order_generator(env, material_stock, machines, production_log, machine_statu
 
 
 # ---------------------------------------------------------------------------
-# FUTTATÁS + ADATBÁZIS-ÍRÁS
+# RUN + DATABASE WRITE
 # ---------------------------------------------------------------------------
 def run_simulation(
     db_path: str = DB_PATH,
@@ -181,23 +180,24 @@ def run_simulation(
     notes: str = "",
 ):
     """
-    Egy teljes szimulációs futást hajt végre és minden eredményt beír az
-    SQLite adatbázisba. Visszaadja a run_id-t.
+    Executes one complete simulation run and writes all results to the
+    SQLite database. Returns the run_id.
 
-    Paraméterek, amiket a Streamlit majd felülír (US-402 szerint):
+    Parameters that Streamlit will later override (per US-402):
       - sim_time, seed, batches (order pattern), batch_interval
-      - machine_overrides: pl. {"Machine0": {"cycle_time": 5.0, "quality": 0.8}}
-        -- csak a megadott gépek/mezők íródnak felül, a többi a
-        prod_config.py alapértékét kapja.
+      - machine_overrides: e.g. {"Machine0": {"cycle_time": 5.0, "quality": 0.8}}
+        -- only the given machines/fields are overridden, the rest get the
+        default value from prod_config.py.
 
-    Ha egyik paramétert sem adod meg, a prod_config.py DEFAULT_* értékei
-    érvényesülnek -- vagyis a script önállóan, Streamlit nélkül is fut.
+    If none of these parameters are provided, the DEFAULT_* values from
+    prod_config.py apply -- meaning the script also runs standalone,
+    without Streamlit.
     """
     random.seed(seed)
 
     batches = batches if batches is not None else DEFAULT_BATCHES
 
-    # Gépparaméterek: alap + esetleges felülírás (nem mutáljuk az eredeti configot)
+    # Machine parameters: base + optional overrides (we don't mutate the original config)
     machine_params = copy.deepcopy(DEFAULT_MACHINE_PARAMS)
     if machine_overrides:
         for machine_name, overrides in machine_overrides.items():
@@ -235,15 +235,15 @@ def run_simulation(
 
         finish_run(conn, run_id, status="COMPLETED")
 
-        print(f"[OK] run_id={run_id} lezárva COMPLETED státusszal.")
-        print(f"     production_events: {len(production_log)} sor")
-        print(f"     machine_status_log: {len(machine_status_log)} sor")
+        print(f"[OK] run_id={run_id} closed with COMPLETED status.")
+        print(f"     production_events: {len(production_log)} rows")
+        print(f"     machine_status_log: {len(machine_status_log)} rows")
 
         return run_id
 
     except Exception:
         finish_run(conn, run_id, status="FAILED")
-        print(f"[HIBA] run_id={run_id} FAILED státuszra állítva.")
+        print(f"[ERROR] run_id={run_id} set to FAILED status.")
         raise
     finally:
         conn.close()
@@ -254,16 +254,16 @@ def quick_sanity_check(db_path: str = DB_PATH, run_id: int = None):
     if run_id is None:
         run_id = conn.execute("SELECT MAX(run_id) FROM simulation_runs").fetchone()[0]
 
-    print(f"\n--- Ellenőrzés: run_id = {run_id} ---")
+    print(f"\n--- Check: run_id = {run_id} ---")
     for table in ["simulation_runs", "production_events", "machine_status_log", "material_stock_log"]:
         limit = "" if table == "simulation_runs" else "LIMIT 5"
         df = pd.read_sql(f"SELECT * FROM {table} WHERE run_id = {run_id} {limit}", conn)
-        print(f"\n{table} (első néhány sor):")
+        print(f"\n{table} (first few rows):")
         print(df)
 
     conn.close()
 
 
 if __name__ == "__main__":
-    new_run_id = run_simulation(notes="US-401 teszt futás (config-ból importálva)")
+    new_run_id = run_simulation(notes="US-401 test run (imported from config)")
     quick_sanity_check(run_id=new_run_id)

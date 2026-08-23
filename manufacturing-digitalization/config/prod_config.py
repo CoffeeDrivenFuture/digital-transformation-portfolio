@@ -2,43 +2,41 @@
 """
 prod_config.py
 ---------------
-Egyetlen, központi hely a gyár konfigurációjára. Célja, hogy se a
-szimuláció (production_sim_db.py), se a KPI-motor (kpi_engine.py), se a
-majdani Streamlit dashboard NE tartalmazza duplikálva ugyanazokat a
-gépparamétereket, útvonalakat, anyagokat — mindenki innen importál.
+Single, central place for the factory's configuration, so the simulation
+(production_sim_db.py), the KPI engine (kpi_engine.py), and the Streamlit
+dashboard don't each duplicate the same machine parameters, routes, and
+materials -- everyone imports from here.
 
-A fájl két, egyértelműen elkülönített részre oszlik:
+The file has two parts:
 
-  1. STRUKTURÁLIS KONFIGURÁCIÓ
-     A gyár "fizikai" felépítése: milyen gépek vannak, milyen útvonalon
-     megy át rajtuk egy-egy termék, milyen alapanyagot igényelnek.
-     -> Ez NEM Streamlit-widget. Ha ez futásonként változna, az nem
-        "mi lenne, ha" szimuláció volna, hanem egy másik gyár.
+  1. STRUCTURAL CONFIGURATION -- the factory's physical layout: what
+     machines exist, what route a given product travels through them,
+     what raw material they require. This isn't a Streamlit widget; if it
+     changed from run to run, it wouldn't be a "what if" simulation, it'd
+     be a different factory.
 
-  2. ALAPÉRTELMEZETT FUTTATÁSI PARAMÉTEREK
-     Minden, amit a Jira US-402 explicit felsorol Streamlit-bemenetként:
-     "order pattern, batch size, product mix, machine cycle time,
-     MTBF/MTTR, quality rate". Itt csak az ALAPÉRTÉKEK vannak megadva —
-     a run_simulation() függvény (production_sim_db.py) argumentumként
-     fogadja ugyanezeket, és felülírja velük az itteni defaultot, ha a
-     Streamlit (vagy bármilyen más hívó) megadja őket.
+  2. DEFAULT RUNTIME PARAMETERS -- everything Jira US-402 lists as
+     Streamlit input (order pattern, batch size, product mix, machine
+     cycle time, MTBF/MTTR, quality rate). Only the defaults live here;
+     run_simulation() in production_sim_db.py takes the same values as
+     arguments and overrides these defaults whenever Streamlit or another
+     caller supplies them.
 
-Fontos: a MACHINE_PARAMS-ban a cycle_time és quality alap esetben is
-"futtatási paraméternek" számít a Jira szerint (a felhasználó tudja
-állítani a dashboardon) — de mivel gépenként külön kell tudni módosítani
-őket, nem egy sima globális default, hanem maga a MACHINE_PARAMS dict
-lesz az, amit a Streamlit majd gépenként felülír (lásd a run_simulation
-`machine_overrides` paraméterét).
+cycle_time and quality in MACHINE_PARAMS also count as runtime parameters
+per Jira -- the user can adjust them on the dashboard -- but since they
+need to be set per machine rather than as one global default, the
+MACHINE_PARAMS dict itself is what Streamlit overrides per machine (see
+run_simulation's `machine_overrides` argument).
 """
 
 # ---------------------------------------------------------------------------
-# 1. STRUKTURÁLIS KONFIGURÁCIÓ — a gyár felépítése, ritkán/soha nem változik
+# 1. STRUCTURAL CONFIGURATION — the factory's layout, rarely/never changes
 # ---------------------------------------------------------------------------
 
-# Melyik géppel milyen alap MTBF/MTTR/cycle_time/quality tartozik.
-# A cycle_time és quality értékét a Streamlit futásonként felülírhatja
-# (lásd run_simulation(machine_overrides=...)), de a gépek LISTÁJA
-# (Machine0..Machine4) strukturális adat.
+# Which machine has which base MTBF/MTTR/cycle_time/quality.
+# The cycle_time and quality values can be overridden per run by Streamlit
+# (see run_simulation(machine_overrides=...)), but the LIST of machines
+# (Machine0..Machine4) is structural data.
 MACHINE_PARAMS = {
     "Machine0": {"mtbf": 500, "mttr": 60, "quality": 0.7322999408201399, "cycle_time": 4.57},
     "Machine1": {"mtbf": 500, "mttr": 60, "quality": 0.7617075260435038, "cycle_time": 5.29},
@@ -47,8 +45,9 @@ MACHINE_PARAMS = {
     "Machine4": {"mtbf": 500, "mttr": 60, "quality": 0.9470171087907475, "cycle_time": 4.74},
 }
 
-# Melyik termék milyen gépsoron megy végig, és melyik gépen milyen
-# alapanyagból mennyit igényel. Ez a gyár topológiája -> strukturális.
+# Which product goes through which machine line, and how much of which raw
+# material it requires at which machine. This is the factory's topology,
+# so it's structural.
 PRODUCT_PARAMS = {
     "A": {
         "route": ["Machine0", "Machine2", "Machine3"],
@@ -60,10 +59,9 @@ PRODUCT_PARAMS = {
     },
 }
 
-# Alapanyag-utánpótlási szabályok (min szint, batch méret, gyártási/átállási idő).
-# Ez is strukturális: az, hogy "material1"-ből mennyi idő alatt lehet
-# utángyártani, a beszállítói/gyártási folyamat tulajdonsága, nem egy
-# "mi lenne ha" kérdés.
+# Raw material replenishment rules (min level, batch size, production/changeover time).
+# This is also structural: how long it takes to replenish "material1" is a
+# property of the supplier/manufacturing process, not a "what if" question.
 MATERIAL_PARAMS = {
     "material1": {"min_level": 28, "batch_size": 15, "unit_time": 4, "changeover_time": 60},
     "material2": {"min_level": 36, "batch_size": 30, "unit_time": 6, "changeover_time": 90},
@@ -71,19 +69,19 @@ MATERIAL_PARAMS = {
 
 
 # ---------------------------------------------------------------------------
-# 2. ALAPÉRTELMEZETT FUTTATÁSI PARAMÉTEREK — ezeket írja majd felül a Streamlit
+# 2. DEFAULT RUNTIME PARAMETERS — these will be overridden by Streamlit
 # ---------------------------------------------------------------------------
 
 DEFAULT_RANDOM_SEED = 42
-DEFAULT_SIM_TIME = 5 * 24 * 60  # 5 nap percben
-DEFAULT_BATCH_INTERVAL = 12 * 60  # 720 perc
+DEFAULT_SIM_TIME = 5 * 24 * 60  # 5 days in minutes
+DEFAULT_BATCH_INTERVAL = 12 * 60  # 720 minutes
 DEFAULT_TOTAL_PIECES_PER_BATCH = 40
 
-# Rendelési minta (order pattern): batch-enként termék-mix.
-# A Jira US-201 "configurable batch size, interval, and product mix"
-# elvárása ide fut be -- ez a legvalószínűbb dolog, amit a Streamlit
-# egy slider-triplettel (batch méret, intervallum, A/B arány) generál
-# majd újra, ahelyett hogy ezt a kézzel írt listát használná.
+# Order pattern: product mix per batch.
+# The Jira US-201 "configurable batch size, interval, and product mix"
+# requirement lands here -- this is most likely what Streamlit will
+# regenerate with a slider triplet (batch size, interval, A/B ratio)
+# instead of using this hand-written list.
 DEFAULT_BATCHES = [
     {"A": 18, "B": 22}, {"A": 30, "B": 10}, {"A": 12, "B": 28},
     {"A": 27, "B": 13}, {"A": 20, "B": 20}, {"A": 17, "B": 23},
@@ -94,12 +92,12 @@ DEFAULT_BATCHES = [
 
 def generate_batches(n_batches: int, total_per_batch: int, a_share: float = 0.5, seed: int = None) -> list:
     """
-    Segédfüggvény, amivel a Streamlit (vagy bárki) új order pattern-t tud
-    generálni ahelyett, hogy a DEFAULT_BATCHES-t hardkódolva használná.
+    Helper function that lets Streamlit (or anyone) generate a new order
+    pattern instead of using the hardcoded DEFAULT_BATCHES.
 
-    a_share: az "A" termék hozzávetőleges aránya (0-1 között). A pontos
-    darabszám batch-enként kicsit szór a véletlen miatt, hogy realisztikus
-    maradjon a minta.
+    a_share: the approximate share of the "A" product (between 0-1). The
+    exact quantity per batch varies slightly due to randomness, to keep
+    the pattern realistic.
     """
     import random as _random
 

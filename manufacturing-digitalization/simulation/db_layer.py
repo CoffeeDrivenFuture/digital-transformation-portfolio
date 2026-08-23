@@ -2,17 +2,18 @@
 """
 db_layer.py
 -----------
-US-401 megvalósításának adatbázis-rétege.
+The database layer for the US-401 implementation.
 
-Ez a modul felel mindenért, ami az SQLite adatbázissal kapcsolatos:
-- a séma létrehozása (a case_a_confluence_jira_sql.md III. fejezete alapján),
-- egy új szimulációs "run" indítása és lezárása,
-- a szimuláció közben gyűjtött adatok (production_events, machine_status_log,
-  material_stock_log) tömeges beírása.
+This module is responsible for everything related to the SQLite database:
+- creating the schema (based on chapter III of case_a_confluence_jira_sql.md),
+- starting and finishing a new simulation "run",
+- bulk-writing the data collected during the simulation (production_events,
+  machine_status_log, material_stock_log).
 
-A cél, hogy a szimulációs kód (production_sim_db.py) NE tartalmazzon SQL-t
-közvetlenül a fő logikában — csak meghívja ezeket a függvényeket. Így a két
-felelősség (mi történik a gyárban / mi kerül az adatbázisba) külön marad.
+The goal is that the simulation code (production_sim_db.py) should NOT
+contain SQL directly in the main logic — it should just call these
+functions. This way the two responsibilities (what happens in the factory /
+what goes into the database) stay separate.
 """
 
 import os
@@ -21,12 +22,12 @@ from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
-# 1. SÉMA
+# 1. SCHEMA
 # ---------------------------------------------------------------------------
-# Ez majdnem szó szerint a case_a_confluence_jira_sql.md III. fejezetéből jön.
-# Egy dolgot hozzáadtam a specifikációhoz képest: a simulation_runs táblába
-# egy `status` oszlopot ('RUNNING' | 'COMPLETED' | 'FAILED'), pontosan úgy,
-# ahogy azt a US-401 Jira acceptance criteria előírja:
+# This comes almost verbatim from chapter III of case_a_confluence_jira_sql.md.
+# One thing I added compared to the spec: a `status` column
+# ('RUNNING' | 'COMPLETED' | 'FAILED') on the simulation_runs table, exactly
+# as prescribed by the US-401 Jira acceptance criteria:
 #   "simulation_runs includes a status flag ... so downstream consumers
 #    only process finalized runs."
 SCHEMA_SQL = """
@@ -139,7 +140,7 @@ CREATE TABLE IF NOT EXISTS operator_assignments (
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    """Megnyit egy kapcsolatot az SQLite fájlhoz, és bekapcsolja az FK-ellenőrzést."""
+    """Opens a connection to the SQLite file, and turns on FK checking."""
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -147,16 +148,17 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Létrehozza a táblákat, ha még nem léteznek. Ismételten futtatható, nem töröl semmit."""
+    """Creates the tables if they don't already exist. Can be run repeatedly, deletes nothing."""
     conn.executescript(SCHEMA_SQL)
     conn.commit()
 
 
 def upsert_master_data(conn, machines: dict, products: dict, materials: dict) -> None:
     """
-    Feltölti a törzsadat-táblákat (machines, products, product_routes, materials)
-    a szimuláció konfigurációjából. INSERT OR REPLACE-t használunk, hogy több
-    futtatás között is konzisztens maradjon, ha időközben módosulnak a paraméterek.
+    Populates the master data tables (machines, products, product_routes,
+    materials) from the simulation configuration. We use INSERT OR REPLACE
+    so it stays consistent across multiple runs if the parameters change
+    in the meantime.
     """
     cur = conn.cursor()
 
@@ -200,9 +202,9 @@ def upsert_master_data(conn, machines: dict, products: dict, materials: dict) ->
 
 def start_run(conn: sqlite3.Connection, sim_duration: int, random_seed: int, notes: str = "") -> int:
     """
-    Új sort szúr be a simulation_runs táblába 'RUNNING' státusszal, és
-    visszaadja az új run_id-t. Ezt az azonosítót kell minden további
-    logolt eseményhez csatolni.
+    Inserts a new row into the simulation_runs table with 'RUNNING' status,
+    and returns the new run_id. This identifier must be attached to every
+    further logged event.
     """
     cur = conn.cursor()
     cur.execute(
@@ -216,12 +218,12 @@ def start_run(conn: sqlite3.Connection, sim_duration: int, random_seed: int, not
 
 def finish_run(conn: sqlite3.Connection, run_id: int, status: str) -> None:
     """
-    Lezár egy futást: beírja a befejezés időpontját és a végső státuszt
-    ('COMPLETED' vagy 'FAILED'). A Confluence spec "Hibakezelés" pontja
-    szerint: ha a szimuláció hibával megszakad, a részleges adat az
-    adatbázisban marad, de a KPI-motor csak COMPLETED futásokat dolgoz fel.
+    Closes out a run: writes the finish timestamp and the final status
+    ('COMPLETED' or 'FAILED'). Per the Confluence spec's "Error handling"
+    section: if the simulation aborts with an error, the partial data
+    stays in the database, but the KPI engine only processes COMPLETED runs.
     """
-    assert status in ("COMPLETED", "FAILED"), "status csak COMPLETED vagy FAILED lehet"
+    assert status in ("COMPLETED", "FAILED"), "status can only be COMPLETED or FAILED"
     conn.execute(
         "UPDATE simulation_runs SET finished_at = ?, status = ? WHERE run_id = ?",
         (datetime.now(timezone.utc).isoformat(), status, run_id),
@@ -257,9 +259,9 @@ def bulk_insert_machine_status(conn, run_id: int, events: list) -> None:
 def bulk_insert_material_stock(conn, run_id: int, snapshots: list, material_ids: list) -> None:
     """
     snapshots: [{"time":..., "material1": <level>, "material2": <level>, ...}, ...]
-    Ez a "wide" formátumú stock_snapshot-okat alakítja "long" formátumú
-    sorokká (egy sor / anyag / időpont), mert a machine_status_log tábla is
-    így van normalizálva.
+    This converts "wide" format stock_snapshots into "long" format rows
+    (one row / material / timestamp), because the machine_status_log table
+    is normalized the same way.
     """
     rows = []
     for snap in snapshots:
