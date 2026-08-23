@@ -38,11 +38,11 @@ run_simulation's `machine_overrides` argument).
 # (see run_simulation(machine_overrides=...)), but the LIST of machines
 # (Machine0..Machine4) is structural data.
 MACHINE_PARAMS = {
-    "Machine0": {"mtbf": 500, "mttr": 60, "quality": 0.7322999408201399, "cycle_time": 4.57},
-    "Machine1": {"mtbf": 500, "mttr": 60, "quality": 0.7617075260435038, "cycle_time": 5.29},
-    "Machine2": {"mtbf": 500, "mttr": 60, "quality": 0.8756414891134877, "cycle_time": 4.73},
-    "Machine3": {"mtbf": 500, "mttr": 60, "quality": 0.8998779966556945, "cycle_time": 5.03},
-    "Machine4": {"mtbf": 500, "mttr": 60, "quality": 0.9470171087907475, "cycle_time": 4.74},
+    "Machine0": {"mtbf": 800, "mttr": 50, "quality": 0.75, "cycle_time": 4.5},
+    "Machine1": {"mtbf": 500, "mttr": 60, "quality": 0.66, "cycle_time": 5.3},
+    "Machine2": {"mtbf": 200, "mttr": 200, "quality": 0.8, "cycle_time": 6.1},
+    "Machine3": {"mtbf": 1200, "mttr": 100, "quality": 0.9, "cycle_time": 7.2},
+    "Machine4": {"mtbf": 500, "mttr": 60, "quality": 0.8, "cycle_time": 5.5},
 }
 
 # Which product goes through which machine line, and how much of which raw

@@ -41,13 +41,21 @@ from config.prod_config import (                                   # noqa: E402
     DEFAULT_TOTAL_PIECES_PER_BATCH,
     generate_batches,
 )
-from db_layer import get_connection                                # noqa: E402
+from db_layer import get_connection, init_db                        # noqa: E402
 from production_sim_db import run_simulation, DB_PATH               # noqa: E402
 from kpi_engine import run_kpi_engine, _build_segments               # noqa: E402, PLC0415  # type: ignore[import-not-found]
 
 DAY_LENGTH = 24 * 60
 
 st.set_page_config(page_title="Manufacturing Digitalization", layout="wide")
+
+# On a fresh clone the .db file has no schema yet if the simulation has
+# never been run, which used to crash the very first page load with
+# "no such table: simulation_runs" instead of showing the "no runs yet"
+# message below. init_db() is idempotent (CREATE TABLE IF NOT EXISTS).
+_init_conn = get_connection(DB_PATH)
+init_db(_init_conn)
+_init_conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -108,14 +116,43 @@ def get_run_meta(run_id: int) -> dict:
 # ---------------------------------------------------------------------------
 st.sidebar.header("Simulation parameters")
 
-sim_days = st.sidebar.slider("Simulation length (days)", 1, 10, DEFAULT_SIM_TIME // DAY_LENGTH)
-seed = st.sidebar.number_input("Random seed", value=DEFAULT_RANDOM_SEED, step=1)
+# Recommended demo scenario (MFG-18): the DEFAULT_* order pattern under-loads
+# the machines to roughly 13-28% of raw capacity, which gives single-digit
+# OEE that isn't representative of a real shop floor. This preset lands in
+# a more believable range (~40-80% OEE, avg ~54%) while still keeping the
+# genuine Machine3 bottleneck / Machine4 material-supply story visible.
+RECOMMENDED_PRESET = {
+    "sim_days": 5, "seed": 7, "n_batches": 50,
+    "batch_interval_h": 2.5, "total_per_batch": 40, "a_share": 0.5,
+}
+
+# Seed session_state with the ordinary defaults only on first load. After
+# that, the sliders below read/write session_state exclusively via `key=`;
+# passing a `value=` on top of a key whose session_state was already set
+# from outside the widget (as the preset button does) triggers a Streamlit
+# warning, so defaults are set here once instead of as slider arguments.
+_widget_defaults = {
+    "sim_days": DEFAULT_SIM_TIME // DAY_LENGTH, "seed": DEFAULT_RANDOM_SEED,
+    "n_batches": 10, "batch_interval_h": float(DEFAULT_BATCH_INTERVAL // 60),
+    "total_per_batch": DEFAULT_TOTAL_PIECES_PER_BATCH, "a_share": 0.5,
+}
+for _key, _value in _widget_defaults.items():
+    if _key not in st.session_state:
+        st.session_state[_key] = _value
+
+if st.sidebar.button("Load recommended demo scenario", width="stretch"):
+    for preset_key, preset_value in RECOMMENDED_PRESET.items():
+        st.session_state[preset_key] = preset_value
+    st.rerun()
+
+sim_days = st.sidebar.slider("Simulation length (days)", 1, 10, key="sim_days")
+seed = st.sidebar.number_input("Random seed", step=1, key="seed")
 
 st.sidebar.subheader("Order pattern")
-n_batches = st.sidebar.slider("Number of orders (batches)", 3, 30, 10)
-batch_interval_h = st.sidebar.slider("Time between orders (hours)", 2, 24, DEFAULT_BATCH_INTERVAL // 60)
-total_per_batch = st.sidebar.slider("Batch size (pcs/order)", 10, 100, DEFAULT_TOTAL_PIECES_PER_BATCH)
-a_share = st.sidebar.slider("Share of product 'A' in the mix", 0.0, 1.0, 0.5, step=0.05)
+n_batches = st.sidebar.slider("Number of orders (batches)", 3, 60, key="n_batches")
+batch_interval_h = st.sidebar.slider("Time between orders (hours)", 1.0, 24.0, step=0.5, key="batch_interval_h")
+total_per_batch = st.sidebar.slider("Batch size (pcs/order)", 10, 100, key="total_per_batch")
+a_share = st.sidebar.slider("Share of product 'A' in the mix", 0.0, 1.0, step=0.05, key="a_share")
 
 st.sidebar.subheader("Per-machine overrides (optional)")
 st.sidebar.caption("If you don't expand a machine's row, it gets its default (prod_config.py) value.")
