@@ -157,10 +157,19 @@ def compute_kpis_for_run(conn, run_id: int) -> pd.DataFrame:
         "SELECT sim_time, machine_id, status FROM machine_status_log WHERE run_id = ?",
         conn, params=(run_id,),
     )
-    # we take the cycle_time from the machine master data -- this reflects
-    # the parameter actually used for this run (possibly overridden),
-    # not the config default
-    machines_df = pd.read_sql("SELECT machine_id, cycle_time_base FROM machines", conn)
+    # Take cycle_time from this run's own snapshot (run_machine_params), not
+    # the machines master table -- machines gets overwritten by every run,
+    # so reading it directly would silently return whichever run was
+    # simulated most recently instead of what run_id actually used.
+    machines_df = pd.read_sql(
+        "SELECT machine_id, cycle_time_base FROM run_machine_params WHERE run_id = ?",
+        conn, params=(run_id,),
+    )
+    if machines_df.empty:
+        # Runs from before run_machine_params existed have no snapshot --
+        # fall back to the master table (same imprecision these runs
+        # already had, not a regression).
+        machines_df = pd.read_sql("SELECT machine_id, cycle_time_base FROM machines", conn)
     cycle_time_by_machine = dict(zip(machines_df["machine_id"], machines_df["cycle_time_base"]))
 
     machine_ids = sorted(set(status_df["machine_id"]).union(DEFAULT_MACHINE_PARAMS.keys()))

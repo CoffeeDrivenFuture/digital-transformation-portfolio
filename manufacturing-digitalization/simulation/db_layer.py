@@ -95,6 +95,34 @@ CREATE TABLE IF NOT EXISTS material_stock_log (
     stock_level     REAL
 );
 
+-- Per-run snapshots of the machine/material parameters actually used for
+-- that run. machines/materials above stay as the single structural master
+-- table (product_routes has a real FK into machines, which must stay
+-- run-independent) -- but since machine_overrides/material_overrides let
+-- each run use different parameter values, something needs to remember
+-- what a given past run_id actually used, instead of only ever exposing
+-- whatever run_simulation() last wrote into machines/materials. Without
+-- this, a query that means "the value used in run_id=X" would silently
+-- return the most-recently-run simulation's value instead.
+CREATE TABLE IF NOT EXISTS run_machine_params (
+    run_id          INTEGER REFERENCES simulation_runs(run_id),
+    machine_id      TEXT REFERENCES machines(machine_id),
+    mtbf_target     REAL,
+    mttr_target     REAL,
+    cycle_time_base REAL,
+    PRIMARY KEY (run_id, machine_id)
+);
+
+CREATE TABLE IF NOT EXISTS run_material_params (
+    run_id            INTEGER REFERENCES simulation_runs(run_id),
+    material_id       TEXT REFERENCES materials(material_id),
+    min_level         REAL,
+    batch_size        REAL,
+    unit_time         REAL,
+    changeover_time   REAL,
+    PRIMARY KEY (run_id, material_id)
+);
+
 CREATE TABLE IF NOT EXISTS material_recommendations (
     run_id            INTEGER REFERENCES simulation_runs(run_id),
     material_id       TEXT REFERENCES materials(material_id),
@@ -194,6 +222,37 @@ def upsert_master_data(conn, machines: dict, products: dict, materials: dict) ->
                 props["batch_size"],
                 props["unit_time"],
                 props["changeover_time"],
+            ),
+        )
+
+    conn.commit()
+
+
+def insert_run_params(conn, run_id: int, machines: dict, materials: dict) -> None:
+    """
+    Snapshots the machine/material parameters actually used for this run
+    into run_machine_params / run_material_params, so a later query for
+    "what did run_id=X actually use" doesn't have to rely on the
+    machines/materials master tables, which get overwritten by every run.
+    """
+    cur = conn.cursor()
+
+    for machine_id, params in machines.items():
+        cur.execute(
+            """INSERT OR REPLACE INTO run_machine_params
+               (run_id, machine_id, mtbf_target, mttr_target, cycle_time_base)
+               VALUES (?, ?, ?, ?, ?)""",
+            (run_id, machine_id, params["mtbf"], params["mttr"], params["cycle_time"]),
+        )
+
+    for material_id, props in materials.items():
+        cur.execute(
+            """INSERT OR REPLACE INTO run_material_params
+               (run_id, material_id, min_level, batch_size, unit_time, changeover_time)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                run_id, material_id,
+                props["min_level"], props["batch_size"], props["unit_time"], props["changeover_time"],
             ),
         )
 

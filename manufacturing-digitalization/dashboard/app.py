@@ -45,6 +45,7 @@ from config.prod_config import (                                   # noqa: E402
 from db_layer import get_connection, init_db                        # noqa: E402
 from production_sim_db import run_simulation, DB_PATH               # noqa: E402
 from kpi_engine import run_kpi_engine, _build_segments, _split_segments_by_day  # noqa: E402, PLC0415  # type: ignore[import-not-found]
+from stock_recommendation import compute_min_stock_levels, save_stock_recommendations  # noqa: E402
 
 DAY_LENGTH = 24 * 60
 
@@ -133,10 +134,63 @@ def get_material_stock_log(run_id: int) -> pd.DataFrame:
         conn.close()
 
 
-def get_materials() -> pd.DataFrame:
+def get_materials(run_id: int) -> pd.DataFrame:
+    """
+    min_level for the materials actually used in this run. Reads
+    run_material_params (the per-run snapshot), not the materials master
+    table -- that table gets overwritten by every run_simulation() call,
+    so reading it directly would show whichever run was simulated most
+    recently instead of what run_id actually used (visible as soon as two
+    runs use different min_level, e.g. via the MFG-9 recommendation flow).
+    """
     conn = get_connection(DB_PATH)
     try:
-        return pd.read_sql("SELECT material_id, min_level FROM materials", conn)
+        df = pd.read_sql(
+            "SELECT material_id, min_level FROM run_material_params WHERE run_id = ?",
+            conn, params=(run_id,),
+        )
+        if df.empty:
+            # Runs from before run_material_params existed have no snapshot --
+            # fall back to the master table (same imprecision these runs
+            # already had, not a regression).
+            df = pd.read_sql("SELECT material_id, min_level FROM materials", conn)
+        return df
+    finally:
+        conn.close()
+
+
+def get_production_output(run_id: int) -> pd.DataFrame:
+    """
+    Counts FINISHED units per product, good vs. bad -- based on the
+    outcome at each product's LAST route stage, not a raw COUNT(*) over
+    production_events. A unit logs one event per machine in its route
+    (e.g. 3 stops for both A and B here), so counting raw rows would both
+    triple-count the same physical unit and mix in intermediate-station
+    quality checks instead of the one that actually determines the
+    finished unit's outcome. The last stage per product is read from
+    product_routes (MAX(sequence_order)) rather than hardcoded, so this
+    still works if routes change.
+    """
+    conn = get_connection(DB_PATH)
+    try:
+        return pd.read_sql(
+            """
+            SELECT pe.product_id, pe.is_good, COUNT(*) as n
+            FROM production_events pe
+            JOIN (
+                SELECT product_id, machine_id
+                FROM product_routes pr1
+                WHERE sequence_order = (
+                    SELECT MAX(sequence_order) FROM product_routes pr2
+                    WHERE pr2.product_id = pr1.product_id
+                )
+            ) last_stage
+              ON pe.product_id = last_stage.product_id AND pe.machine_id = last_stage.machine_id
+            WHERE pe.run_id = ?
+            GROUP BY pe.product_id, pe.is_good
+            """,
+            conn, params=(run_id,),
+        )
     finally:
         conn.close()
 
@@ -278,6 +332,41 @@ col2.metric("Length (days)", meta["sim_duration"] // DAY_LENGTH)
 col3.metric("Seed", meta["random_seed"])
 if meta["notes"]:
     st.caption(f"Notes: {meta['notes']}")
+
+# --- MFG-8 / US-201: production output summary ------------------------------
+st.header("Production output summary")
+
+output_df = get_production_output(run_id)
+
+if output_df.empty:
+    st.info("No finished units recorded for this run yet.")
+else:
+    products = sorted(output_df["product_id"].unique())
+    stat_cols = st.columns(len(products))
+    for col, product_id in zip(stat_cols, products):
+        sub = output_df[output_df["product_id"] == product_id]
+        good = int(sub.loc[sub["is_good"] == 1, "n"].sum())
+        bad = int(sub.loc[sub["is_good"] == 0, "n"].sum())
+        total = good + bad
+        yield_pct = (good / total * 100) if total else 0.0
+        with col:
+            st.subheader(f"Product {product_id}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total", total)
+            c2.metric("Good", good)
+            c3.metric("Bad", bad)
+            c4.metric("Yield", f"{yield_pct:.0f}%")
+
+    output_chart_df = output_df.copy()
+    output_chart_df["Outcome"] = output_chart_df["is_good"].map({1: "Good", 0: "Bad"})
+    fig_output = px.bar(
+        output_chart_df, x="product_id", y="n", color="Outcome", barmode="stack",
+        color_discrete_map={"Good": "#4CAF50", "Bad": "#EF5350"},
+        labels={"product_id": "Product", "n": "Units"},
+        title="Finished units per product: good vs. bad",
+    )
+    apply_dark_theme(fig_output)
+    st.plotly_chart(fig_output, width="stretch")
 
 kpi_df = get_kpi_daily(run_id)
 
@@ -483,16 +572,17 @@ else:
 st.header("Material stock level over time")
 
 stock_df = get_material_stock_log(run_id)
-materials_df = get_materials()
+materials_df = get_materials(run_id)
 
 if stock_df.empty:
     st.info("No material stock data for this run.")
 else:
     # Deliberately not downsampled or smoothed: the raw fluctuation is the
     # point -- it's what makes a material running consistently close to its
-    # reorder threshold (e.g. material2) visible at a glance. A future
-    # feature will compute recommended minimum stock levels from this same
-    # raw signal, so smoothing it away here would work against that later.
+    # reorder threshold (e.g. material2) visible at a glance. The minimum
+    # stock level recommendation below (MFG-9) is computed from this same
+    # raw consumption signal, so smoothing it away here would work against
+    # that.
     stock_df = stock_df.sort_values(["material_id", "sim_time"])
     stock_df["hours"] = stock_df["sim_time"] / 60
 
@@ -518,3 +608,55 @@ else:
         )
         apply_dark_theme(fig_mat)
         st.plotly_chart(fig_mat, width="stretch")
+
+# --- MFG-9 / US-202: minimum stock level recommendation ---------------------
+st.header("Minimum stock level recommendation")
+
+safety_factor = st.slider("Safety factor", 1.0, 2.0, 1.2, step=0.05)
+
+if st.button("Calculate & save minimum stock levels"):
+    _rec_conn = get_connection(DB_PATH)
+    try:
+        recs = compute_min_stock_levels(_rec_conn, run_id, safety_factor)
+        save_stock_recommendations(_rec_conn, run_id, recs)
+    finally:
+        _rec_conn.close()
+    st.session_state["last_stock_recommendation"] = recs
+    st.session_state["last_stock_recommendation_run_id"] = run_id
+    st.success("Saved to material_recommendations.")
+
+if "last_stock_recommendation" in st.session_state:
+    recs = st.session_state["last_stock_recommendation"]
+    rec_source_run_id = st.session_state.get("last_stock_recommendation_run_id")
+    if rec_source_run_id != run_id:
+        st.caption(f"Computed from run_id={rec_source_run_id}, not the currently displayed run_id={run_id}.")
+    rec_df = pd.DataFrame(recs).T.reset_index().rename(columns={"index": "material_id"})
+    st.dataframe(rec_df, width="stretch")
+
+    if st.button("Apply these levels and run a new simulation"):
+        material_overrides_from_recs = {
+            mat_id: {"min_level": r["min_stock_level"]}
+            for mat_id, r in recs.items()
+        }
+        # Reuse the sidebar's current order pattern (sim_days, seed, batches,
+        # batch_interval, machine_overrides) rather than the selected run's
+        # stored sim_duration/random_seed alone -- those two fields don't
+        # capture the order pattern (n_batches/total_per_batch/a_share aren't
+        # persisted per run), so regenerating from just seed+duration could
+        # silently compare against a different order pattern and confound
+        # the before/after read on blocked time. This way only
+        # material_overrides differs from a plain "Run new simulation" click.
+        compare_batches = generate_batches(n_batches, total_per_batch, a_share=a_share, seed=int(seed))
+        with st.spinner("Running simulation with recommended stock levels..."):
+            new_run_id = run_simulation(
+                sim_time=sim_days * DAY_LENGTH,
+                seed=int(seed),
+                batches=compare_batches,
+                batch_interval=batch_interval_h * 60,
+                machine_overrides=machine_overrides or None,
+                material_overrides=material_overrides_from_recs,
+                notes="Re-run with recommended minimum stock levels",
+            )
+        run_kpi_engine(new_run_id)
+        st.session_state["selected_run_id"] = new_run_id
+        st.rerun()

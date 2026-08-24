@@ -41,6 +41,7 @@ from db_layer import (                                           # noqa: E402
     get_connection,
     init_db,
     upsert_master_data,
+    insert_run_params,
     start_run,
     finish_run,
     bulk_insert_production_events,
@@ -105,14 +106,14 @@ class Machine:
 # ---------------------------------------------------------------------------
 # MATERIAL SUPPLY (unchanged)
 # ---------------------------------------------------------------------------
-def pre_production(env, material_stock, material_stock_log, material_logs):
+def pre_production(env, material_stock, material_stock_log, material_logs, material_params):
     while True:
         snapshot = {"time": env.now}
         for mat, qty in material_stock.items():
             snapshot[mat] = qty.level
         material_stock_log.append(snapshot)
 
-        for mat, props in MATERIAL_PARAMS.items():
+        for mat, props in material_params.items():
             if material_stock[mat].level < props["min_level"]:
                 env.process(produce_material(env, material_stock, mat, props, material_logs))
 
@@ -177,6 +178,7 @@ def run_simulation(
     batches: list = None,
     batch_interval: int = DEFAULT_BATCH_INTERVAL,
     machine_overrides: dict = None,
+    material_overrides: dict = None,
     notes: str = "",
 ):
     """
@@ -188,6 +190,11 @@ def run_simulation(
       - machine_overrides: e.g. {"Machine0": {"cycle_time": 5.0, "quality": 0.8}}
         -- only the given machines/fields are overridden, the rest get the
         default value from prod_config.py.
+      - material_overrides: e.g. {"material1": {"min_level": 65}} -- same
+        merge-over-defaults pattern as machine_overrides, used by the
+        MFG-9 "apply recommended stock levels" flow to raise a material's
+        reorder threshold without touching its batch_size/unit_time/
+        changeover_time.
 
     If none of these parameters are provided, the DEFAULT_* values from
     prod_config.py apply -- meaning the script also runs standalone,
@@ -197,17 +204,24 @@ def run_simulation(
 
     batches = batches if batches is not None else DEFAULT_BATCHES
 
-    # Machine parameters: base + optional overrides (we don't mutate the original config)
+    # Machine and material parameters: base + optional overrides (we don't
+    # mutate the original config dicts).
     machine_params = copy.deepcopy(DEFAULT_MACHINE_PARAMS)
     if machine_overrides:
         for machine_name, overrides in machine_overrides.items():
             machine_params.setdefault(machine_name, {}).update(overrides)
 
+    material_params = copy.deepcopy(MATERIAL_PARAMS)
+    if material_overrides:
+        for material_name, overrides in material_overrides.items():
+            material_params.setdefault(material_name, {}).update(overrides)
+
     conn = get_connection(db_path)
     init_db(conn)
-    upsert_master_data(conn, machine_params, PRODUCT_PARAMS, MATERIAL_PARAMS)
+    upsert_master_data(conn, machine_params, PRODUCT_PARAMS, material_params)
 
     run_id = start_run(conn, sim_duration=sim_time, random_seed=seed, notes=notes)
+    insert_run_params(conn, run_id, machine_params, material_params)
 
     material_logs, order_log = [], []
     production_log, material_stock_log, machine_status_log = [], [], []
@@ -221,7 +235,7 @@ def run_simulation(
             "material2": simpy.Container(env, 50, init=50),
         }
 
-        env.process(pre_production(env, material_stock, material_stock_log, material_logs))
+        env.process(pre_production(env, material_stock, material_stock_log, material_logs, material_params))
         env.process(order_generator(
             env, material_stock, machines, production_log, machine_status_log, order_log,
             batches, batch_interval,
@@ -231,7 +245,7 @@ def run_simulation(
 
         bulk_insert_production_events(conn, run_id, production_log)
         bulk_insert_machine_status(conn, run_id, machine_status_log)
-        bulk_insert_material_stock(conn, run_id, material_stock_log, list(MATERIAL_PARAMS.keys()))
+        bulk_insert_material_stock(conn, run_id, material_stock_log, list(material_params.keys()))
 
         finish_run(conn, run_id, status="COMPLETED")
 
