@@ -63,8 +63,8 @@ PRODUCT_PARAMS = {
 # This is also structural: how long it takes to replenish "material1" is a
 # property of the supplier/manufacturing process, not a "what if" question.
 MATERIAL_PARAMS = {
-    "material1": {"min_level": 28, "batch_size": 15, "unit_time": 4, "changeover_time": 60},
-    "material2": {"min_level": 36, "batch_size": 30, "unit_time": 6, "changeover_time": 90},
+    "material1": {"min_level": 28, "batch_size": 15, "unit_time": 4, "changeover_time": 100},
+    "material2": {"min_level": 36, "batch_size": 30, "unit_time": 6, "changeover_time": 150},
 }
 
 
@@ -76,6 +76,13 @@ DEFAULT_RANDOM_SEED = 42
 DEFAULT_SIM_TIME = 5 * 24 * 60  # 5 days in minutes
 DEFAULT_BATCH_INTERVAL = 12 * 60  # 720 minutes
 DEFAULT_TOTAL_PIECES_PER_BATCH = 40
+
+# Business/management OEE target -- distinct from the generic industry
+# benchmarks (60% typical, 85% world-class) shown in the dashboard. This is
+# a reporting/goal-setting value, not a physical simulation input, so it
+# lives here as a simple constant rather than something Streamlit overrides
+# per-run.
+TARGET_OEE = 0.75
 
 # Order pattern: product mix per batch.
 # The Jira US-201 "configurable batch size, interval, and product mix"
