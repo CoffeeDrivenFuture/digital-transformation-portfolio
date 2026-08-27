@@ -17,8 +17,8 @@ import sys
 
 import pandas as pd
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))       # .../case-a/simulation
-PROJECT_ROOT = os.path.dirname(BASE_DIR)                     # .../case-a
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))       # .../manufacturing_simulation/simulation
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                     # .../manufacturing_simulation
 sys.path.insert(0, PROJECT_ROOT)
 
 from config.prod_config import PRODUCT_PARAMS  # noqa: E402

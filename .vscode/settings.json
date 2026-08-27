@@ -1,7 +1,7 @@
 {
   "python.analysis.extraPaths": [
-    "./manufacturing-digitalization",
-    "./manufacturing-digitalization/simulation",
-    "./manufacturing-digitalization/config"
+    "./manufacturing_simulation",
+    "./manufacturing_simulation/simulation",
+    "./manufacturing_simulation/config"
   ]
 }

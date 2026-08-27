@@ -51,8 +51,8 @@ from collections import defaultdict
 
 import pandas as pd
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))       # .../case-a/kpi
-PROJECT_ROOT = os.path.dirname(BASE_DIR)                     # .../case-a
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))       # .../manufacturing_simulation/kpi
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                     # .../manufacturing_simulation
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "simulation"))
 

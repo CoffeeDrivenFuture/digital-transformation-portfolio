@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-app.py -- Case A Streamlit dashboard (US-402)
+app.py -- Manufacturing Simulation Streamlit dashboard (US-402)
 
 Covers the US-402 acceptance criteria: the dashboard reads from the SQLite
 file via SQL queries, the "Run new simulation" button kicks off a fresh run
@@ -14,8 +14,8 @@ dashboard would otherwise be pretty empty.
 
 Deliberately not implemented here, left in the backlog: US-102 (SQDCP
 category/tier filter -- the current schema has no SQDCP categorization for
-the KPIs, that's a separate story), US-204 (Yamazumi chart -- belongs in
-its own component), and US-403 (Power BI -- a different tool entirely).
+the KPIs, that's a separate story), and US-403 (Power BI -- a different
+tool entirely).
 """
 
 import os
@@ -27,14 +27,15 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # --- accessing config/simulation/kpi modules, independent of folder structure --
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))            # .../case-a/dashboard
-PROJECT_ROOT = os.path.dirname(BASE_DIR)                          # .../case-a
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))            # .../manufacturing_simulation/dashboard
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                          # .../manufacturing_simulation
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "simulation"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "kpi"))
 
 from config.prod_config import (                                   # noqa: E402
     MACHINE_PARAMS as DEFAULT_MACHINE_PARAMS,
+    PRODUCT_PARAMS,
     DEFAULT_SIM_TIME,
     DEFAULT_RANDOM_SEED,
     DEFAULT_BATCH_INTERVAL,
@@ -74,7 +75,7 @@ def apply_dark_theme(fig):
     return fig
 
 
-st.set_page_config(page_title="Manufacturing Digitalization", layout="wide")
+st.set_page_config(page_title="Manufacturing Simulation", layout="wide")
 
 # On a fresh clone the .db file has no schema yet if the simulation has
 # never been run, which used to crash the very first page load with
@@ -159,6 +160,31 @@ def get_materials(run_id: int) -> pd.DataFrame:
         conn.close()
 
 
+def get_machine_cycle_times(run_id: int) -> dict:
+    """
+    machine_id -> cycle_time actually used for this run. Reads
+    run_machine_params (the per-run snapshot, MFG-20), not the machines
+    master table -- same reasoning as get_materials() above: the master
+    table gets overwritten by every run_simulation() call, so reading it
+    directly would show whichever run was simulated most recently instead
+    of what run_id actually used.
+    """
+    conn = get_connection(DB_PATH)
+    try:
+        df = pd.read_sql(
+            "SELECT machine_id, cycle_time_base FROM run_machine_params WHERE run_id = ?",
+            conn, params=(run_id,),
+        )
+        if df.empty:
+            # Runs from before run_machine_params existed have no snapshot --
+            # fall back to the master table (same imprecision these runs
+            # already had, not a regression).
+            df = pd.read_sql("SELECT machine_id, cycle_time_base FROM machines", conn)
+        return dict(zip(df["machine_id"], df["cycle_time_base"]))
+    finally:
+        conn.close()
+
+
 def get_production_output(run_id: int) -> pd.DataFrame:
     """
     Counts FINISHED units per product, good vs. bad -- based on the
@@ -215,15 +241,19 @@ def get_run_meta(run_id: int) -> dict:
 # ---------------------------------------------------------------------------
 st.sidebar.header("Simulation parameters")
 
-# Recommended demo scenario (MFG-18): the DEFAULT_* order pattern under-loads
-# the machines to roughly 13-28% of raw capacity, which gives single-digit
-# OEE that isn't representative of a real shop floor. This preset lands in
-# a more believable range (avg OEE in the high-40s to mid-50s%) while still
-# keeping the genuine Machine3 bottleneck / Machine4 material-supply story
-# visible.
+# Recommended demo scenario (MFG-18, retuned for MFG-11): the DEFAULT_*
+# order pattern under-loads the machines to roughly 13-28% of raw capacity,
+# giving single-digit OEE that isn't representative of a real shop floor.
+# This preset lands takt_time (batch_interval / total_per_batch) at 6.0
+# minutes -- avg OEE ~43% (range ~25-90%), still presentable and keeping
+# the genuine Machine3 bottleneck / Machine4 material-supply story visible,
+# while also giving the MFG-11 Yamazumi chart a real mix of over/under-takt
+# stations on both product routes (a tighter takt_time, like the previous
+# 3.75 min, fails every station on both routes, so the chart's color-coding
+# never shows its "good" state at all).
 RECOMMENDED_PRESET = {
-    "sim_days": 5, "seed": 7, "n_batches": 50,
-    "batch_interval_h": 2.5, "total_per_batch": 40, "a_share": 0.5,
+    "sim_days": 5, "seed": 7, "n_batches": 30,
+    "batch_interval_h": 4.0, "total_per_batch": 40, "a_share": 0.5,
 }
 
 # Seed session_state with the ordinary defaults only on first load. After
@@ -306,7 +336,7 @@ if run_clicked:
 # ---------------------------------------------------------------------------
 # MAIN CONTENT -- run selector + KPIs
 # ---------------------------------------------------------------------------
-st.title("Manufacturing Digitalization Dashboard")
+st.title("Manufacturing Simulation Dashboard")
 
 runs_df = get_completed_runs()
 
@@ -440,6 +470,41 @@ st.plotly_chart(fig_breakdown, width="stretch")
 st.caption("The bars show the daily average of Availability / Performance / Quality per machine "
            "-- see the OEE per machine chart above for the combined score.")
 
+# --- MFG-11: Yamazumi chart -- cycle time vs. takt time ---------------------
+st.header("Yamazumi chart: cycle time vs. takt time")
+
+yamazumi_cycle_times = get_machine_cycle_times(run_id)
+takt_time = (batch_interval_h * 60) / total_per_batch  # minutes per unit, from order pattern
+
+product_tab_a, product_tab_b = st.tabs(["Product A", "Product B"])
+
+for product_id, tab in [("A", product_tab_a), ("B", product_tab_b)]:
+    with tab:
+        route = PRODUCT_PARAMS[product_id]["route"]
+        cycle_times = [yamazumi_cycle_times.get(machine_id, 0.0) for machine_id in route]
+        bar_colors = [
+            STATUS_COLORS["repair"] if ct > takt_time else STATUS_COLORS["working"]
+            for ct in cycle_times
+        ]
+
+        avg_cycle_time = sum(cycle_times) / len(cycle_times)
+        st.metric(f"Average cycle time -- Product {product_id} route", f"{avg_cycle_time:.2f} min")
+
+        fig_yamazumi = go.Figure()
+        fig_yamazumi.add_trace(go.Bar(x=route, y=cycle_times, marker_color=bar_colors, name="Cycle time"))
+        fig_yamazumi.add_hline(
+            y=takt_time, line_dash="dash", line_color="#FAFAFA",
+            annotation_text=f"Takt time: {takt_time:.1f} min", annotation_position="top left",
+        )
+        fig_yamazumi.update_layout(xaxis_title="Station", yaxis_title="Cycle time (min)", height=380)
+        apply_dark_theme(fig_yamazumi)
+        st.plotly_chart(fig_yamazumi, width="stretch")
+        st.caption(
+            "Takt time reflects the order pattern currently configured in the sidebar, "
+            "not necessarily the historical order pattern of the selected run -- order "
+            "pattern isn't persisted per run today, only machine/material params (MFG-20)."
+        )
+
 with st.expander("Daily KPI trends", expanded=False):
     # Explicit color map, built once and reused across all 4 tabs, so a
     # given machine keeps the same color in every tab -- a fresh px.line
@@ -454,16 +519,35 @@ with st.expander("Daily KPI trends", expanded=False):
 
     tabs = st.tabs(["OEE", "Availability", "Performance", "Quality"])
     metric_cols = ["oee", "availability", "performance", "quality"]
+    # Explicit labels -- metric_col.capitalize() would turn "oee" into "Oee"
+    # instead of "OEE".
+    metric_labels = {"oee": "OEE", "availability": "Availability", "performance": "Performance", "quality": "Quality"}
     for tab, metric_col in zip(tabs, metric_cols):
         with tab:
             fig_trend = px.line(
                 kpi_df, x="sim_day", y=metric_col, color="machine_id",
                 markers=True, color_discrete_map=machine_color_map,
-                labels={"sim_day": "Day", metric_col: metric_col.capitalize(), "machine_id": "Machine"},
+                labels={"sim_day": "Day", metric_col: metric_labels[metric_col], "machine_id": "Machine"},
             )
-            fig_trend.update_layout(yaxis_tickformat=".0%")
+            # Fixed 0-100% axis on OEE/Availability/Quality, which are
+            # mathematically bounded to that range. Performance is the one
+            # metric that can go above 100% (see "How these numbers are
+            # calculated" above) -- that's a real, documented value, not a
+            # data bug, so its axis is left to expand to the actual max
+            # instead of clipping it off; the caption below flags it
+            # instead of hiding it.
+            if metric_col == "performance":
+                y_max = max(1.0, float(kpi_df["performance"].max())) * 1.05
+                fig_trend.update_layout(yaxis_tickformat=".0%", yaxis_range=[0, y_max])
+            else:
+                fig_trend.update_layout(yaxis_tickformat=".0%", yaxis_range=[0, 1])
             apply_dark_theme(fig_trend)
             st.plotly_chart(fig_trend, width="stretch")
+            if metric_col == "performance" and (kpi_df["performance"] > 1).any():
+                st.caption(
+                    "Performance exceeded 100% on at least one machine-day -- see "
+                    "\"How these numbers are calculated\" above for why that's possible in this model."
+                )
 
 with st.expander("Daily KPI table"):
     # ProgressColumn's printf-style format ("%.0f%%") is applied to the raw

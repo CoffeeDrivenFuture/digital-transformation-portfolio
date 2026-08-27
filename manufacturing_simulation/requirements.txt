@@ -1,4 +1,4 @@
-# Manufacturing Digitalization
+# Manufacturing Simulation
 # Pontos verziók, amikkel a kód ténylegesen tesztelve lett.
 # Telepítés: pip install -r requirements.txt
 

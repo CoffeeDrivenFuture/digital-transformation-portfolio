@@ -1,4 +1,4 @@
-#  Manufacturing Digitalization
+#  Manufacturing Simulation
 
 
 ## EPIC 1: Production KPI Framework (SQDCP)

@@ -30,6 +30,13 @@ from datetime import datetime, timezone
 # as prescribed by the US-401 Jira acceptance criteria:
 #   "simulation_runs includes a status flag ... so downstream consumers
 #    only process finalized runs."
+#
+# One thing removed compared to the spec: the original schema also had
+# operators / skill_matrix / operator_assignments tables for US-301/302
+# (operator-station assignment optimization). Nothing in this codebase ever
+# reads or writes them -- that work now lives in a separate project (see
+# README's "Deliberately out of scope" note) -- so they were dropped rather
+# than kept as dead, never-populated tables.
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS machines (
     machine_id      TEXT PRIMARY KEY,
@@ -144,26 +151,6 @@ CREATE TABLE IF NOT EXISTS kpi_daily (
     PRIMARY KEY (run_id, sim_day, machine_id)
 );
 
-CREATE TABLE IF NOT EXISTS operators (
-    operator_id     TEXT PRIMARY KEY,
-    name            TEXT
-);
-
-CREATE TABLE IF NOT EXISTS skill_matrix (
-    operator_id     TEXT REFERENCES operators(operator_id),
-    station_id      TEXT,
-    skill_level     INTEGER,
-    routine_level   INTEGER,
-    PRIMARY KEY (operator_id, station_id)
-);
-
-CREATE TABLE IF NOT EXISTS operator_assignments (
-    run_id            INTEGER REFERENCES simulation_runs(run_id),
-    operator_id       TEXT REFERENCES operators(operator_id),
-    station_id        TEXT,
-    competency_score  REAL,
-    PRIMARY KEY (run_id, operator_id)
-);
 """
 
 
