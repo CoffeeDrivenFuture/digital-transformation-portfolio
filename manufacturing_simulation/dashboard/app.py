@@ -337,6 +337,7 @@ if run_clicked:
 # MAIN CONTENT -- run selector + KPIs
 # ---------------------------------------------------------------------------
 st.title("Manufacturing Simulation Dashboard")
+st.info("This is a live demo — data may reset periodically; click 'Load recommended demo scenario' to get started.")
 
 runs_df = get_completed_runs()
 
