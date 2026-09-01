@@ -1,0 +1,6 @@
+# Dark theme so the charts (transparent backgrounds, light ink) render as
+# intended regardless of the viewer's Streamlit setting. Mirrors the
+# manufacturing_simulation dashboard's look.
+[theme]
+base = "dark"
+primaryColor = "#2196F3"

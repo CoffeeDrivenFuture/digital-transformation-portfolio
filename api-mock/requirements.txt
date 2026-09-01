@@ -1,0 +1,4 @@
+# API Mock (Flask)
+# Telepítés: pip install -r requirements.txt
+
+Flask==3.1.3

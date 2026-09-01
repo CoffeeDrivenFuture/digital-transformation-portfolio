@@ -1,8 +1,9 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.defaultInterpreterPath": "${workspaceFolder}/manufacturing_simulation/.venv/Scripts/python.exe",
   "python.analysis.extraPaths": [
     "./manufacturing_simulation",
     "./manufacturing_simulation/simulation",
-    "./manufacturing_simulation/config"
+    "./manufacturing_simulation/config",
+    "./workforce_optimization"
   ]
 }

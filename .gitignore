@@ -4,3 +4,6 @@ __pycache__/
 *.db
 .DS_Store
 Thumbs.db
+
+# workforce_optimization: last-valid-upload cache (data_io/store.py)
+.cache/
