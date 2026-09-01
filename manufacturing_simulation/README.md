@@ -75,6 +75,9 @@ and the dashboard renders those, comparable across runs.
 
 ## OEE, MTBF, MTTR
 
+How this project computes them -- not necessarily identical to every
+textbook OEE/MTBF variant:
+
 - **Availability** = working time / (working + blocked + repair time)
 - **Performance** = (ideal cycle time x units produced) / working time --
   can exceed 100% if a machine outpaces its nominal cycle time (a property
