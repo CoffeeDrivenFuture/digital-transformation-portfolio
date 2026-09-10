@@ -6,6 +6,3 @@ simpy==4.1.2
 pandas==3.0.2
 streamlit==1.62.0
 plotly==6.9.0
-
-# --- Még nem használt, később jövő Epic-ekhez kell majd -------------------
-# pulp==...          # US-301/302 -- operátor-allokáció optimalizálás
