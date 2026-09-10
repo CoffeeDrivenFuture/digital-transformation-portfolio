@@ -1,0 +1,13 @@
+# Digital Transformation Portfolio
+# Root requirements file for both Manufacturing Simulation and Workforce Optimization
+# Install: pip install -r requirements.txt
+
+# Manufacturing Simulation dependencies
+simpy==4.1.2
+pandas==3.0.5
+streamlit==1.62.0
+plotly==6.9.0
+
+# Workforce Optimization dependencies
+pulp==3.3.2
+openpyxl==3.1.5
