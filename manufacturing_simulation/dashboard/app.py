@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "kpi"))
 
 from config.prod_config import (                                   # noqa: E402
     MACHINE_PARAMS as DEFAULT_MACHINE_PARAMS,
+    MATERIAL_PARAMS as DEFAULT_MATERIAL_PARAMS,
     PRODUCT_PARAMS,
     DEFAULT_SIM_TIME,
     DEFAULT_RANDOM_SEED,
@@ -313,6 +314,20 @@ for machine_name, base_params in DEFAULT_MACHINE_PARAMS.items():
                 "mtbf": mtbf, "mttr": mttr,
             }
 
+st.sidebar.subheader("Per-material overrides (optional)")
+st.sidebar.caption("If you don't expand a material's row, it gets its default (prod_config.py) min_level.")
+
+material_overrides = {}
+for material_id, base_params in DEFAULT_MATERIAL_PARAMS.items():
+    with st.sidebar.expander(material_id):
+        override_on = st.checkbox("Enable override", key=f"ov_mat_{material_id}")
+        min_level = st.slider(
+            "Minimum stock level", 0, 200, int(base_params["min_level"]),
+            step=1, key=f"minlevel_{material_id}", disabled=not override_on,
+        )
+        if override_on:
+            material_overrides[material_id] = {"min_level": min_level}
+
 run_clicked = st.sidebar.button("Run new simulation", type="primary", width="stretch")
 
 if run_clicked:
@@ -324,6 +339,7 @@ if run_clicked:
             batches=batches,
             batch_interval=batch_interval_h * 60,
             machine_overrides=machine_overrides or None,
+            material_overrides=material_overrides or None,
             notes="Streamlit dashboard run",
         )
     with st.spinner("Computing KPIs..."):
@@ -679,6 +695,7 @@ else:
         fig_mat.add_trace(go.Scatter(
             x=mat_data["hours"], y=mat_data["stock_level"],
             mode="lines", line_shape="hv", fill="tozeroy", name=material_id,
+            line_color="#4C78A8", fillcolor="rgba(76, 120, 168, 0.4)",
         ))
         if material_id in min_level_by_material:
             fig_mat.add_hline(
