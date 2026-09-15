@@ -232,7 +232,7 @@ def run_simulation(
 
         material_stock = {
             "material1": simpy.Container(env, 50, init=50),
-            "material2": simpy.Container(env, 50, init=50),
+            "material2": simpy.Container(env, 50, init=100),
         }
 
         env.process(pre_production(env, material_stock, material_stock_log, material_logs, material_params))
