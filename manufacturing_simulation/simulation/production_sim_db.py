@@ -231,8 +231,8 @@ def run_simulation(
         machines = {name: Machine(env, name, params, machine_status_log) for name, params in machine_params.items()}
 
         material_stock = {
-            "material1": simpy.Container(env, 50, init=50),
-            "material2": simpy.Container(env, 70, init=100),
+            "material1": simpy.Container(env, 100, init=50),
+            "material2": simpy.Container(env, 120, init=90),
         }
 
         env.process(pre_production(env, material_stock, material_stock_log, material_logs, material_params))
