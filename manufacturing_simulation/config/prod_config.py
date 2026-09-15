@@ -64,7 +64,7 @@ PRODUCT_PARAMS = {
 # property of the supplier/manufacturing process, not a "what if" question.
 MATERIAL_PARAMS = {
     "material1": {"min_level": 40, "batch_size": 15, "unit_time": 4, "changeover_time": 100},
-    "material2": {"min_level": 54, "batch_size": 30, "unit_time": 6, "changeover_time": 150},
+    "material2": {"min_level": 90, "batch_size": 30, "unit_time": 6, "changeover_time": 150},
 }
 
 
