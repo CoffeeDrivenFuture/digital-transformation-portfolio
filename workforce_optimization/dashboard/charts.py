@@ -117,7 +117,7 @@ def coverage_heatmap(coverage_df, target: int, title: str) -> go.Figure:
 
     fig = go.Figure(go.Heatmap(
         z=codes, x=stations, y=shifts, xgap=3, ygap=3,
-        colorscale=[[0, BAD_FILL], [1, OK_FILL]], showscale=False, zmin=0, zmax=1,
+        colorscale=[[0, BAD], [1, OK]], showscale=False, zmin=0, zmax=1,
         customdata=counts,
         hovertemplate="%{y} / station %{x}: %{customdata} eligible<extra></extra>",
     ))
@@ -143,7 +143,7 @@ def skill_matrix_heatmap(skill_df, routine_df, levels) -> go.Figure:
     operators = list(skill_df.index)
     stations = list(skill_df.columns)
 
-    codes, colors = [], {0: BAD_FILL, 1: WARN_FILL, 2: OK_FILL}
+    codes, colors = [], {0: BAD, 1: WARN, 2: OK}
     for op in operators:
         row = []
         for stn in stations:
