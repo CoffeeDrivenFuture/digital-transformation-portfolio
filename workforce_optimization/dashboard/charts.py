@@ -61,7 +61,7 @@ def station_staffing_bar(stations: list, required: dict, assigned: dict) -> go.F
     req = [required[s] for s in stations]
     got = [min(assigned.get(s, 0), r) for s, r in zip(stations, req)]
     gap = [r - g for g, r in zip(got, req)]
-    fill_colors = [OK if g >= r else WARN for g, r in zip(got, req)]
+    fill_colors = [OK if g >= r else BAD for g, r in zip(got, req)]
 
     fig = go.Figure()
     fig.add_bar(y=stations, x=got, orientation="h", marker_color=fill_colors,
