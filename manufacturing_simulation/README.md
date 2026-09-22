@@ -17,8 +17,9 @@ Development of a Production Unit -- From Systems Thinking to Simulation
 Support"* (Lean Engineer postgraduate program, Debrecen, 2025), pairing a
 tiered SQDCP KPI framework with a discrete-event simulation to answer
 capacity/bottleneck questions before committing to a real production plan.
-This repo continues the simulation half of that work; the organizational
-side of the KPI tree isn't part of this codebase.
+This repo continues the simulation half of that work; see
+[`kpi_governance_framework/`](../kpi_governance_framework) for the
+organizational/governance side of the same thesis.
 
 ## AI-assisted development
 
