@@ -16,7 +16,7 @@ operational problem, not from a technology I wanted to try out.
   discrete-event production line simulation (SimPy + SQLite) turned into
   an OEE/MTBF/MTTR decision-support dashboard. Builds on the simulation
   half of my Lean Engineer thesis, which paired a tiered SQDCP KPI
-  framework with this kind of model *(diagram to be added)*.
+  framework with this kind of model.
 - **[`workforce_optimization/`](./workforce_optimization)** -- operator-
   to-station assignment based on skill and hands-on routine rather than
   interchangeable headcount, with coverage-risk and training/promotion
