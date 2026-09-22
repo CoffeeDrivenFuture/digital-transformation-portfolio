@@ -6,6 +6,8 @@ turns the resulting event log into OEE/MTBF/MTTR figures you can compare
 across "what if" scenarios -- different order volumes, machine parameters,
 or stock policies -- without touching a real line.
 
+Live link : https://manufacturing-simulation.streamlit.app/
+
 ## Background
 
 This started as my own SimPy simulation and scheduling/routing code from
