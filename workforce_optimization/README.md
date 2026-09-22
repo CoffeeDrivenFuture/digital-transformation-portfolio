@@ -6,6 +6,8 @@ and how much hands-on practice they have (routine). It surfaces coverage
 risks -- stations that depend on a single person -- and suggests who to
 promote and who to cross-train.
 
+Live link : https://workforce-optimization.streamlit.app/
+
 Second project of the digital transformation portfolio, alongside
 `manufacturing_simulation`, with its own virtual environment.
 
