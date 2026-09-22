@@ -28,6 +28,10 @@ operational problem, not from a technology I wanted to try out.
   human steps, with SLA escalation, a REST API wired in through a Python job worker,
   and an automated end-to-end test. Includes a documented decision to leave AI out 
   of the routing logic, since the input is structured data, not free text.
+- **[`kpi_governance_framework/`](./kpi_governance_framework)** -- tiered
+  KPI tree and Tiered Daily Management meeting cadence for a new
+  production ramp-up, from the organizational/governance side of my
+  Lean Engineer thesis.
 
 ## How this was built
 
@@ -54,4 +58,5 @@ All three projects are functional and independently runnable -- see each project
 manufacturing_simulation/         Case study 1
 workforce_optimization/           Case study 2
 fleet_maintenance_orchestration/  Case study 3
+kpi_governance_framework/         Case study 4
 ```
