@@ -1,0 +1,33 @@
+{
+  "components": [
+    {
+      "label": "Select",
+      "values": [
+        {
+          "label": "Solved",
+          "value": "true"
+        },
+        {
+          "label": "Not Solved",
+          "value": "false"
+        }
+      ],
+      "type": "select",
+      "layout": {
+        "row": "Row_1geq0pq",
+        "columns": null
+      },
+      "id": "Field_1vbft2o",
+      "key": "issue_solved"
+    }
+  ],
+  "type": "default",
+  "id": "Form_0i1prhh",
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.9.0",
+  "exporter": {
+    "name": "Camunda Modeler",
+    "version": "5.49.0"
+  },
+  "schemaVersion": 19
+}
