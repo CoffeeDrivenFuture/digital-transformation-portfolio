@@ -21,6 +21,13 @@ operational problem, not from a technology I wanted to try out.
   to-station assignment based on skill and hands-on routine rather than
   interchangeable headcount, with coverage-risk and training/promotion
   analysis (PuLP optimization + Streamlit).
+- **[`fleet_maintenance_orchestration/`](./fleet_maintenance_orchestration)** -- 
+  a deliberately different skill area from the other two: process orchestration
+  and system integration rather than simulation or optimization. A BPMN 2.0 
+  process (Camunda 8 / Zeebe) that routes equipment alerts through automated and
+  human steps, with SLA escalation, a REST API wired in through a Python job worker,
+  and an automated end-to-end test. Includes a documented decision to leave AI out 
+  of the routing logic, since the input is structured data, not free text.
 
 ## How this was built
 
@@ -36,16 +43,15 @@ that actually runs, end to end.
 
 ## Process documentation
 
-Requirements, backlog, and decisions for both projects are tracked in
+Requirements, backlog, and decisions for Case 1 and Case 2 projects are tracked in
 Jira and Confluence.
 
 ## Status
 
-Both projects are functional and independently runnable -- see each
-project's README for setup. Portfolio still being extended.
+All three projects are functional and independently runnable -- see each project's README for setup. Portfolio still being extended.
 
 ```
-manufacturing_simulation/   Case study 1
-workforce_optimization/     Case study 2
-api-mock/                   in progress
+manufacturing_simulation/         Case study 1
+workforce_optimization/           Case study 2
+fleet_maintenance_orchestration/  Case study 3
 ```
